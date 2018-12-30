@@ -20,7 +20,7 @@ using Random
 
     c = PriorityChannel{Int,Int}(Inf)
     @test eltype(c) == Int
-    pvals = map(i->put!(c,i), 1:10^6)
+    pvals = map(i->put!(c,i,i), 1:10^6)
     tvals = Int[take!(c) for i in 1:10^6]
     @test pvals == tvals
 

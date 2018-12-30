@@ -3,14 +3,9 @@ export PriorityChannel
 using DataStructures
 import Base: notify_error, register_taskdone_hook, check_channel_state
 
-# struct PriorityElement{T,I<:Real}
-#     elem::T
-#     priority::I
-# end
 
 const PriorityElement{T,I<:Real} = Tuple{T,I}
-
-Base.:<(p1::PriorityElement,p2::PriorityElement) = p1.priority < p2.priority
+const ordering = Base.By(x->x[2])
 
 
 """
@@ -180,7 +175,7 @@ function Base.put!(c::PriorityChannel{T,I}, v,i::I = 0) where {T,I<:Real}
     while length(c.data) == c.sz_max
         wait(c.cond_put)
     end
-    heappush!(c.data, PriorityElement((v,i)))
+    heappush!(c.data, PriorityElement((v,i)), ordering)
 
     # notify all, since some of the waiters may be on a "fetch" call.
     notify(c.cond_take, nothing, true, false)
@@ -209,7 +204,7 @@ Remove and return the highest priority value from a [`PriorityChannel`](@ref). B
 """
 function Base.take!(c::PriorityChannel)
     wait(c)
-    v = heappop!(c.data)[1]
+    v = heappop!(c.data, ordering)[1]
     notify(c.cond_put, nothing, false, false) # notify only one, since only one slot has become available for a put!.
     v
 end
@@ -250,7 +245,7 @@ function Base.iterate(c::PriorityChannel, state=nothing)
     end
 end
 
-Base.IteratorSize(::Type{<:Channel}) = SizeUnknown()
+Base.IteratorSize(::Type{<:PriorityChannel}) = SizeUnknown()
 
 
 end # module
