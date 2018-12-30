@@ -23,3 +23,32 @@ pelems = [take!(pc) for i = 1:50]
 - `PriorityChannel` can not be unbuffered (of length 0) and must have a positive length.
 - [`take!(pc)`](https://docs.julialang.org/en/v1/base/parallel/#Base.take!-Tuple{Channel}) returns the highest priority item, `PriorityChannel` thus acts like a  [priority queue](https://en.wikipedia.org/wiki/Priority_queue) instead of a FIFO queue like `Channel` does
 - Pretty much all other functionality should be the same, including all constructors.
+
+## Performance
+To get maximum performance, initialize a concretely typed `PriorityChannel`. The constructor `PriorityChannel(N)` creates a channel of length `N` that holds type `Any` and have integer priorities. These types can be specified with the constructor `PriorityChannel{ElemType,PrioType}(N)`, e.g., `PriorityChannel{Int,Int}(N)`. There is a rather striking difference in performance between these two:
+```julia
+using PriorityChannels
+N = 1_000_000
+r = rand(1:1000, N);
+const c1 = PriorityChannel(N)
+const c2 = PriorityChannel{Int,Int}(N)
+
+@time map(ri->put!(c1,ri,ri), r);
+@time map(ri->put!(c2,ri,ri), r);
+
+@time map(i->take!(c1), 1:N);
+@time map(i->take!(c2), 1:N);
+
+# Output after pre-compilation
+julia> @time map(ri->put!(c1,ri,ri), r);
+  0.663640 seconds (4.33 M allocations: 150.086 MiB, 55.92% gc time)
+
+julia> @time map(ri->put!(c2,ri,ri), r);
+  0.103298 seconds (60.23 k allocations: 12.643 MiB)
+
+julia> @time map(i->take!(c1), 1:N);
+  3.282501 seconds (20.02 M allocations: 612.583 MiB, 27.25% gc time)
+
+julia> @time map(i->take!(c2), 1:N);
+  0.313285 seconds (63.44 k allocations: 10.791 MiB, 4.67% gc time)
+```
