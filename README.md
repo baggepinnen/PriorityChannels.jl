@@ -1,6 +1,6 @@
 # PriorityChannels
 
-[![Build Status](https://travis-ci.com/baggepinnen/PriorityChannels.jl.svg?branch=master)](https://travis-ci.com/baggepinnen/PriorityChannels.jl)
+[![Build Status](https://travis-ci.org/baggepinnen/PriorityChannels.jl.svg?branch=master)](https://travis-ci.org/baggepinnen/PriorityChannels.jl)
 
 provides a type `PriorityChannel` that mimics `Base.Channel`, but where each element is associated with a priority. `take!` always returns the highest priority element. Internally, a heap is used to keep track of priorities. Example usage:
 ```julia
