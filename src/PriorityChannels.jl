@@ -50,14 +50,10 @@ mutable struct PriorityChannel{T,I} <: AbstractChannel{T}
         end
     end
     function PriorityChannel{T,I}(sz::Integer) where {T,I<:Real}
-        if sz < 0
-            throw(ArgumentError("Channel size must be either 0, a positive integer or Inf"))
+        if sz <= 0
+            throw(ArgumentError("Channel size must be a positive integer or Inf"))
         end
         ch = new(Condition(), Condition(), :open, nothing, Vector{PriorityElement{T,I}}(), sz, 0)
-        if sz == 0
-            ch.takers = Vector{Task}()
-            ch.putters = Vector{Task}()
-        end
         return ch
     end
 end
@@ -66,7 +62,7 @@ PriorityChannel(sz) = PriorityChannel{Any,Int}(sz)
 
 # special constructors
 """
-    PriorityChannel(func::Function; ctype=Any, csize=0, taskref=nothing)
+    PriorityChannel(func::Function; ctype=Any, csize=1, taskref=nothing)
 
 Create a new task from `func`, bind it to a new channel of type
 `ctype` and size `csize`, and schedule the task, all in a single call.
@@ -76,7 +72,7 @@ Create a new task from `func`, bind it to a new channel of type
 If you need a reference to the created task, pass a `Ref{Task}` object via
 keyword argument `taskref`.
 
-Return a `Channel`.
+Return a `PriorityChannel`.
 
 # Examples
 ```jldoctest
@@ -112,7 +108,7 @@ true
 ```
 """
 function PriorityChannel(func::Function; ctype=Any, csize=1, taskref=nothing)
-    @assert csize >= 1 "PriorityChannel only supports positive sizes"
+    csize > 0 || throw(ArgumentError("Channel size must be a positive integer or Inf"))
     chnl = PriorityChannel{ctype,Int}(csize)
     task = Task(() -> func(chnl))
     bind(chnl, task)
