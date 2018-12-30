@@ -1,7 +1,7 @@
 module PriorityChannels
 export PriorityChannel
 using DataStructures
-import Base: notify_error, register_taskdone_hook
+import Base: notify_error, register_taskdone_hook, check_channel_state
 
 # struct PriorityElement{T,I<:Real}
 #     elem::T
@@ -127,7 +127,7 @@ closed_exception() = InvalidStateException("Channel is closed.", :closed)
 
 isbuffered(c::PriorityChannel) = true
 
-function check_channel_state(c::PriorityChannel)
+function Base.check_channel_state(c::PriorityChannel)
     if !isopen(c)
         c.excp !== nothing && throw(c.excp)
         throw(closed_exception())
