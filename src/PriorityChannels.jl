@@ -1,17 +1,23 @@
 module PriorityChannels
+export PriorityChannel
+using DataStructures
+import Base: notify_error, register_taskdone_hook
 
+# struct PriorityElement{T,I<:Real}
+#     elem::T
+#     priority::I
+# end
 
-struct PriorityElement{T,I<:Integer}
-    elem::T
-    priority::I
-end
+const PriorityElement{T,I<:Real} = Tuple{T,I}
+
+Base.:<(p1::PriorityElement,p2::PriorityElement) = p1.priority < p2.priority
 
 
 """
     PriorityChannel{T}(sz::Int)
 
-Constructs a `Channel` with an internal buffer that can hold a maximum of `sz` objects
-of type `T`.
+Constructs a `PriorityChannel` with an internal buffer that can hold a maximum of `sz` objects
+of type `T`, each assigned an real-valued priority (low number = higher priority).
 [`put!`](@ref) calls on a full channel block until an object is removed with [`take!`](@ref).
 
 `PriorityChannel(0)` constructs an unbuffered channel. `put!` blocks until a matching `take!` is called.
@@ -19,8 +25,8 @@ And vice-versa.
 
 Other constructors:
 
-* `PriorityChannel(Inf)`: equivalent to `Channel{Any}(typemax(Int))`
-* `PriorityChannel(sz)`: equivalent to `Channel{Any}(sz)`
+* `PriorityChannel(Inf)`: equivalent to `PriorityChannel{Any,Int}(typemax(Int))`
+* `PriorityChannel(sz)`: equivalent to `PriorityChannel{Any,Int}(sz)`
 """
 mutable struct PriorityChannel{T,I} <: AbstractChannel{T}
     cond_take::Condition                 # waiting for data to become available
@@ -36,14 +42,14 @@ mutable struct PriorityChannel{T,I} <: AbstractChannel{T}
     takers::Vector{Task}
     putters::Vector{Task}
 
-    function PriorityChannel{T,I}(sz::Float64) where {T,I<:Integer}
+    function PriorityChannel{T,I}(sz::Float64) where {T,I<:Real}
         if sz == Inf
             PriorityChannel{T,I}(typemax(Int))
         else
             PriorityChannel{T,I}(convert(Int, sz))
         end
     end
-    function PriorityChannel{T,I}(sz::Integer) where {T,I<:Integer}
+    function PriorityChannel{T,I}(sz::Integer) where {T,I<:Real}
         if sz < 0
             throw(ArgumentError("Channel size must be either 0, a positive integer or Inf"))
         end
@@ -77,7 +83,7 @@ Return a `Channel`.
 julia> chnl = PriorityChannel(c->foreach(i->put!(c,i), 1:4));
 
 julia> typeof(chnl)
-Channel{Any}
+PriorityChannel{Any,Int64}
 
 julia> for i in chnl
            @show i
@@ -127,14 +133,7 @@ function check_channel_state(c::PriorityChannel)
         throw(closed_exception())
     end
 end
-"""
-    close(c::PriorityChannel)
 
-Close a channel. An exception is thrown by:
-
-* [`put!`](@ref) on a closed channel.
-* [`take!`](@ref) and [`fetch`](@ref) on an empty, closed channel.
-"""
 function Base.close(c::PriorityChannel)
     c.state = :closed
     c.excp = closed_exception()
@@ -143,59 +142,9 @@ function Base.close(c::PriorityChannel)
 end
 Base.isopen(c::PriorityChannel) = (c.state == :open)
 
-"""
-    bind(chnl::PriorityChannel, task::Task)
-
-Associate the lifetime of `chnl` with a task.
-`Channel` `chnl` is automatically closed when the task terminates.
-Any uncaught exception in the task is propagated to all waiters on `chnl`.
-
-The `chnl` object can be explicitly closed independent of task termination.
-Terminating tasks have no effect on already closed `Channel` objects.
-
-When a channel is bound to multiple tasks, the first task to terminate will
-close the channel. When multiple channels are bound to the same task,
-termination of the task will close all of the bound channels.
-
-# Examples
-```jldoctest
-julia> c = PriorityChannel(0);
-
-julia> task = @async foreach(i->put!(c, i), 1:4);
-
-julia> bind(c,task);
-
-julia> for i in c
-           @show i
-       end;
-i = 1
-i = 2
-i = 3
-i = 4
-
-julia> isopen(c)
-false
-```
-
-```jldoctest
-julia> c = PriorityChannel(0);
-
-julia> task = @async (put!(c,1);error("foo"));
-
-julia> bind(c,task);
-
-julia> take!(c)
-1
-
-julia> put!(c,1);
-ERROR: foo
-Stacktrace:
-[...]
-```
-"""
 function Base.bind(c::PriorityChannel, task::Task)
     ref = WeakRef(c)
-    register_taskdone_hook(task, tsk->close_chnl_on_taskdone(tsk, ref))
+    register_taskdone_hook(task, tsk->Base.close_chnl_on_taskdone(tsk, ref))
     c
 end
 
@@ -225,38 +174,17 @@ function channeled_tasks(n::Int, funcs...; ctypes=fill(Any,n), csizes=fill(0,n))
     return (chnls, tasks)
 end
 
-function close_chnl_on_taskdone(t::Task, ref::WeakRef)
-    if ref.value !== nothing
-        c = ref.value
-        !isopen(c) && return
-        if istaskfailed(t)
-            c.state = :closed
-            c.excp = task_result(t)
-            notify_error(c)
-        else
-            close(c)
-        end
-    end
-end
-
 """
-    put!(c::PriorityChannel, v)
+    put!(c::PriorityChannel, v, p)
 
-Append an item `v` to the channel `c`. Blocks if the channel is full.
-
-For unbuffered channels, blocks until a [`take!`](@ref) is performed by a different
-task.
-
-!!! compat "Julia 1.1"
-    `v` now gets converted to the channel's type with [`convert`](@ref) as `put!` is called.
+Append an item `v` to the channel `c` with priority `p`. Blocks if the channel is full.
 """
-function Base.put!(c::PriorityChannel{T,I}, v,i::I = 0) where {T,I<:Integer}
+function Base.put!(c::PriorityChannel{T,I}, v,i::I = 0) where {T,I<:Real}
     check_channel_state(c)
-    v = convert(T, v)
     while length(c.data) == c.sz_max
         wait(c.cond_put)
     end
-    heappush!(c.data, PriorityElement(v,i))
+    heappush!(c.data, PriorityElement((v,i)))
 
     # notify all, since some of the waiters may be on a "fetch" call.
     notify(c.cond_take, nothing, true, false)
@@ -269,41 +197,29 @@ Base.push!(c::PriorityChannel, v, i=0) = put!(c, v, i)
 """
     fetch(c::PriorityChannel)
 
-Wait for and get the first available item from the channel. Does not
-remove the item. `fetch` is unsupported on an unbuffered (0-size) channel.
+Wait for and get the highest priority item from the channel. Does not
+remove the item.
 """
 function Base.fetch(c::PriorityChannel)
     wait(c)
-    c.data[end] # TODO: verify correct
+    c.data[1][1]
 end
 
 
 """
     take!(c::PriorityChannel)
 
-Remove and return a value from a [`Channel`](@ref). Blocks until data is available.
-
-For unbuffered channels, blocks until a [`put!`](@ref) is performed by a different
-task.
+Remove and return the highest priority value from a [`PriorityChannel`](@ref). Blocks until data is available.
 """
 function Base.take!(c::PriorityChannel)
     wait(c)
-    v = heappop!(c.data)
+    v = heappop!(c.data)[1]
     notify(c.cond_put, nothing, false, false) # notify only one, since only one slot has become available for a put!.
     v
 end
 
 Base.popfirst!(c::PriorityChannel) = take!(c)
 
-"""
-    isready(c::PriorityChannel)
-
-Determine whether a [`Channel`](@ref) has a value stored to it. Returns
-immediately, does not block.
-
-For unbuffered channels returns `true` if there are tasks waiting
-on a [`put!`](@ref).
-"""
 Base.isready(c::PriorityChannel) = n_avail(c) > 0
 n_avail(c::PriorityChannel) = length(c.data)
 
@@ -316,11 +232,11 @@ function Base.wait(c::PriorityChannel)
 end
 
 
-function notify_error(c::PriorityChannel, err)
-    notify_error(c.cond_take, err)
-    notify_error(c.cond_put, err)
+function Base.notify_error(c::PriorityChannel, err)
+    Base.notify_error(c.cond_take, err)
+    Base.notify_error(c.cond_put, err)
 end
-notify_error(c::PriorityChannel) = notify_error(c, c.excp)
+Base.notify_error(c::PriorityChannel) = Base.notify_error(c, c.excp)
 
 Base.eltype(::Type{PriorityChannel{T,I}}) where {T,I} = T
 
