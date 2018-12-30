@@ -16,5 +16,4 @@ elems = [take!(c) for i = 1:50]
 pelems = [take!(pc) for i = 1:50]
 @test !issorted(elems) # A regular Channel does not return ordered elements
 @test issorted(pelems) # A PriorityChannel returns elements in priority order
-
-end
+```
